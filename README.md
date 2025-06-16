@@ -1,5 +1,7 @@
 # MonST3R: A Simple Approach for Estimating Geometry in the Presence of Motion
 
+This is a modified version of automatic part segmentation tool for paper [Generalizable Articulated Object Reconstruction from Casually Captured RGBD Videos](https://arxiv.org/abs/2506.08334).
+
 **MonST3R**  processes a dynamic video to produce a time-varying dynamic point cloud, along with per-frame camera poses and intrinsics, in a predominantly **feed-forward** manner. This representation then enables the efficient computation of downstream tasks, such as video depth estimation and dynamic/static scene segmentation.
 
 This repository is the official implementation of the paper:

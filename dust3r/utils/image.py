@@ -12,6 +12,7 @@ from PIL.ImageOps import exif_transpose
 import torchvision.transforms as tvf
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2  # noqa
+from scipy.ndimage import zoom
 import glob
 import imageio
 import matplotlib.pyplot as plt
@@ -275,6 +276,19 @@ def load_images(folder_or_list, size, square_ok=False, verbose=True, dynamic_mas
     if verbose:
         print(f' (Found {len(imgs)} images)')
     return imgs
+
+def load_hand_masks(mask_folder, img_list, size):
+    img_name_list = [os.path.basename(img_path) for img_path in img_list]
+    sample_rgb_index = [int(file_name[:-4]) for file_name in img_name_list]
+    sample_rgb_index.sort()
+    hand_mask_list = []
+    for i in range(len(sample_rgb_index)):
+        hand_mask = np.load(f"{mask_folder}/{sample_rgb_index[i]:06d}.npy")
+        hand_mask = zoom(hand_mask, (size[0] / hand_mask.shape[0], size[1] / hand_mask.shape[1]), order=0)
+        hand_mask = ~hand_mask
+        hand_mask_list.append(torch.from_numpy(hand_mask))
+    hand_masks = torch.stack(hand_mask_list).to(torch.float32)
+    return hand_masks
 
 def load_prev_video_results(prev_output_dir, num_frames, index=None):
     print(f'>> Loading previous video results (rgb, depth, etc.) from {prev_output_dir}')

@@ -35,7 +35,7 @@ class PointCloudOptimizer(BasePCOptimizer):
 
     def __init__(self, *args, optimize_pp=False, focal_break=20, shared_focal=False, flow_loss_fn='smooth_l1', flow_loss_weight=0.0, 
                  depth_regularize_weight=0.0, num_total_iter=300, temporal_smoothing_weight=0, translation_weight=0.1, flow_loss_start_epoch=0.15, flow_loss_thre=50,
-                 sintel_ckpt=False, use_self_mask=False, pxl_thre=50, sam2_mask_refine=True, motion_mask_thre=0.35, batchify=False,
+                 sintel_ckpt=False, use_self_mask=False, pxl_thre=50, sam2_mask_refine=True, motion_mask_thre=0.35, batchify=False, hand_masks=None,
                  window_wise=False, window_size=100, window_overlap_ratio=0.5, prev_video_results=None, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -51,6 +51,10 @@ class PointCloudOptimizer(BasePCOptimizer):
         self.pxl_thre = pxl_thre
         self.motion_mask_thre = motion_mask_thre
         self.batchify = batchify
+        if hand_masks is not None:
+            self.hand_masks = hand_masks
+        else:
+            self.hand_masks = torch.ones((self.n_imgs, self.imshapes[0][0], self.imshapes[0][1]), dtype=torch.float32)
         self.window_wise = window_wise
 
         # adding thing to optimize
@@ -348,8 +352,15 @@ class PointCloudOptimizer(BasePCOptimizer):
         ego_flow_1_2, _ = self.depth_wrapper(self.R_i, self.T_i, self.R_j, self.T_j, 1 / (self.depth_maps_i + 1e-6), self.intrinsics_j, torch.linalg.inv(self.intrinsics_i))
         ego_flow_2_1, _ = self.depth_wrapper(self.R_j, self.T_j, self.R_i, self.T_i, 1 / (self.depth_maps_j + 1e-6), self.intrinsics_i, torch.linalg.inv(self.intrinsics_j))
 
-        err_map_i = torch.norm(ego_flow_1_2[:, :2, ...] - self.flow_ij[:len(symmetry_pairs_idx)], dim=1)
-        err_map_j = torch.norm(ego_flow_2_1[:, :2, ...] - self.flow_ji[:len(symmetry_pairs_idx)], dim=1)
+        self.hand_masks = self.hand_masks.to(self.flow_ij.device)
+        
+        hand_masks_i = self.hand_masks[self._ei[:len(symmetry_pairs_idx)]]
+        err_map_i = torch.norm(ego_flow_1_2[:, :2, ...] - self.flow_ij[:len(symmetry_pairs_idx)], dim=1) * hand_masks_i
+        del hand_masks_i
+        hand_masks_j = self.hand_masks[self._ej[:len(symmetry_pairs_idx)]]
+        err_map_j = torch.norm(ego_flow_2_1[:, :2, ...] - self.flow_ji[:len(symmetry_pairs_idx)], dim=1) * hand_masks_j
+        del hand_masks_j
+
         # normalize the error map for each pair
         err_map_i = (err_map_i - err_map_i.amin(dim=(1, 2), keepdim=True)) / (err_map_i.amax(dim=(1, 2), keepdim=True) - err_map_i.amin(dim=(1, 2), keepdim=True))
         err_map_j = (err_map_j - err_map_j.amin(dim=(1, 2), keepdim=True)) / (err_map_j.amax(dim=(1, 2), keepdim=True) - err_map_j.amin(dim=(1, 2), keepdim=True))

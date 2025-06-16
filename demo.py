@@ -15,7 +15,7 @@ import copy
 from dust3r.inference import inference
 from dust3r.model import AsymmetricCroCo3DStereo
 from dust3r.image_pairs import make_pairs
-from dust3r.utils.image import load_images, load_prev_video_results, rgb, enlarge_seg_masks
+from dust3r.utils.image import load_images, load_hand_masks, load_prev_video_results, rgb, enlarge_seg_masks
 from dust3r.utils.device import to_numpy
 from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
 from dust3r.utils.viz_demo import convert_scene_output_to_glb, get_dynamic_mask_from_pairviewer
@@ -45,9 +45,11 @@ def get_args_parser():
     parser.add_argument("--silent", action='store_true', default=False,
                         help="silence logs")
     parser.add_argument("--input_dir", type=str, help="Path to input images directory", default=None)
+    parser.add_argument("--mask_folder", type=str, help="Path to hand masks directory", default=None)
     parser.add_argument("--seq_name", type=str, help="Sequence name for evaluation", default='NULL')
     parser.add_argument('--use_gt_davis_masks', action='store_true', default=False, help='Use ground truth masks for DAVIS')
     parser.add_argument('--not_batchify', action='store_true', default=False, help='Use non batchify mode for global optimization')
+    parser.add_argument('--motion_mask_thresh', type=float, default=0.35, help='Threshold for motion mask')
     parser.add_argument('--real_time', action='store_true', default=False, help='Realtime mode')
     parser.add_argument('--window_wise', action='store_true', default=False, help='Use window wise mode for optimization')
     parser.add_argument('--window_size', type=int, default=100, help='Window size')
@@ -91,10 +93,10 @@ def get_3D_model_from_scene(outdir, silent, scene, min_conf_thr=3, as_pointcloud
                                         cam_color=cam_color)
 
 
-def get_reconstructed_scene(args, outdir, model, device, silent, image_size, filelist, schedule, niter, min_conf_thr,
+def get_reconstructed_scene(args, outdir, model, device, silent, image_size, filelist, mask_folder, schedule, niter, min_conf_thr,
                             as_pointcloud, mask_sky, clean_depth, transparent_cams, cam_size, show_cam, scenegraph_type, winsize, refid, 
                             seq_name, new_model_weights, temporal_smoothing_weight, translation_weight, shared_focal, 
-                            flow_loss_weight, flow_loss_start_iter, flow_loss_threshold, use_gt_mask, fps, num_frames):
+                            flow_loss_weight, flow_loss_start_iter, flow_loss_threshold, use_gt_mask, fps, num_frames, motion_mask_thre):
     """
     from a list of images, run dust3r inference, global aligner.
     then run get_3D_model_from_scene
@@ -115,6 +117,12 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
     else:
         prev_video_results = None
         imgs = load_images(filelist, size=image_size, verbose=not silent, dynamic_mask_root=dynamic_mask_path, fps=fps, num_frames=num_frames)
+    if mask_folder is not None:
+        # print("true shape:", imgs[0]['true_shape'])
+        img_true_shape = imgs[0]['true_shape'][0] # H W
+        hand_masks = load_hand_masks(mask_folder, filelist, img_true_shape)
+    else:
+        hand_masks = None
         
     if len(imgs) == 1:
         imgs = [imgs[0], copy.deepcopy(imgs[0])]
@@ -131,7 +139,7 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         mode = GlobalAlignerMode.PointCloudOptimizer
         scene = global_aligner(output, device=device, mode=mode, verbose=not silent, shared_focal = shared_focal, temporal_smoothing_weight=temporal_smoothing_weight, translation_weight=translation_weight,
                                flow_loss_weight=flow_loss_weight, flow_loss_start_epoch=flow_loss_start_iter, flow_loss_thre=flow_loss_threshold, use_self_mask=not use_gt_mask,
-                               num_total_iter=niter, empty_cache= len(filelist) > 72, batchify=not (args.not_batchify or args.window_wise),
+                               num_total_iter=niter, empty_cache= len(filelist) > 72, motion_mask_thre=motion_mask_thre, batchify=not (args.not_batchify or args.window_wise), hand_masks=hand_masks,
                                window_wise=args.window_wise, window_size=args.window_size, window_overlap_ratio=args.window_overlap_ratio,
                                prev_video_results=prev_video_results)
     else:
@@ -423,6 +431,7 @@ if __name__ == '__main__':
             # Call the function with default parameters
             scene, outfile, imgs = recon_fun(
                 filelist=input_files,
+                mask_folder=args.mask_folder,
                 schedule='linear',
                 niter=300,
                 min_conf_thr=1.1,
@@ -446,6 +455,7 @@ if __name__ == '__main__':
                 use_gt_mask=args.use_gt_davis_masks,
                 fps=args.fps,
                 num_frames=args.num_frames,
+                motion_mask_thre=args.motion_mask_thresh
             )
         print(f"Processing completed. Output saved in {tmpdirname}/{args.seq_name}")
     else:
